@@ -2,7 +2,7 @@ const pool = require("../db/connection")
 const axios = require("axios")
 
 const createSearch = async (req, res) => {
-  const { location, date_start, date_end } = req.body
+  const { location, date_start, date_end, search_type, country } = req.body
 
   if (!location || !date_start || !date_end) {
     return res.status(400).json({ message: "please fill in all fields" })
@@ -14,11 +14,35 @@ const createSearch = async (req, res) => {
 
   try {
     const chave = process.env.OPENWEATHER_API_KEY
-
     const isCoords = /^-?\d+\.?\d*,-?\d+\.?\d*$/.test(location.trim())
-    const query = isCoords
-      ? `lat=${location.split(',')[0]}&lon=${location.split(',')[1]}`
-      : `q=${location}`
+    const isPostal = search_type === 'postal'
+    const selectedCountry = country || 'BR'
+
+    let query
+
+    if (isCoords) {
+      query = `lat=${location.split(',')[0]}&lon=${location.split(',')[1]}`
+    } else if (isPostal && selectedCountry === 'BR') {
+      // Para CEP brasileiro usa o OpenCEP para converter em cidade
+      const cleanCEP = location.replace(/\D/g, '')
+      try {
+        const cepResponse = await axios.get(`https://opencep.com/v1/${cleanCEP}`)
+        const cepData = cepResponse.data
+        if (!cepData || cepData.erro) {
+          return res.status(404).json({ message: "CEP not found, please check and try again" })
+        }
+        const cidade = cepData.localidade
+        const estado = cepData.uf
+        query = `q=${cidade},${estado},BR`
+      } catch {
+        return res.status(404).json({ message: "CEP not found, please check and try again" })
+      }
+    } else if (isPostal) {
+      // Para outros países usa o zip code diretamente
+      query = `zip=${location.trim()},${selectedCountry}`
+    } else {
+      query = `q=${location}`
+    }
 
     const resultado = await axios.get(
       `https://api.openweathermap.org/data/2.5/forecast?${query}&appid=${chave}&units=metric&lang=en`
